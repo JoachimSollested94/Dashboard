@@ -3,12 +3,20 @@ import requests
 import pandas as pd
 import numpy as np
 
-BINANCE_SPOT = "https://api.binance.com"
-BINANCE_FUTURES = "https://fapi.binance.com"
-
 st.set_page_config(page_title="Crypto Regime Dashboard", layout="wide")
 
-SYMBOLS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
+# CoinGecko coin IDs
+COINS = {
+    "Bitcoin": "bitcoin",
+    "Ethereum": "ethereum",
+    "Solana": "solana",
+    "BNB": "binancecoin",
+    "XRP": "ripple"
+}
+
+# -------------------------
+# SAFE API CALL
+# -------------------------
 
 def safe_get(url, params=None):
     try:
@@ -19,24 +27,35 @@ def safe_get(url, params=None):
     except:
         return None
 
-def get_klines(symbol):
+# -------------------------
+# FETCH HISTORICAL DATA
+# -------------------------
+
+def get_market_data(coin_id):
     data = safe_get(
-        f"{BINANCE_SPOT}/api/v3/klines",
-        params={"symbol": symbol, "interval": "1d", "limit": 400},
+        f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart",
+        params={"vs_currency": "usd", "days": "365"}
     )
-    if not isinstance(data, list):
-        return None
-    df = pd.DataFrame(data)
-    df["close"] = pd.to_numeric(df[4], errors="coerce")
-    df = df.dropna()
-    return df
 
-def calculate_regime(symbol):
-    df = get_klines(symbol)
-    if df is None:
+    if not data or "prices" not in data:
         return None
 
-    close = df["close"]
+    prices = pd.DataFrame(data["prices"], columns=["timestamp", "price"])
+    prices["price"] = pd.to_numeric(prices["price"], errors="coerce")
+    prices = prices.dropna()
+
+    return prices
+
+# -------------------------
+# REGIME CALCULATION
+# -------------------------
+
+def calculate_regime(coin_id):
+    df = get_market_data(coin_id)
+    if df is None or len(df) < 200:
+        return None
+
+    close = df["price"]
 
     price = close.iloc[-1]
     sma50 = close.rolling(50).mean().iloc[-1]
@@ -72,23 +91,34 @@ def calculate_regime(symbol):
 
     return price, sma50, sma200, vol30, vol180, label, score
 
+# -------------------------
+# UI
+# -------------------------
 
-st.title("Crypto Regime Dashboard (Binance Public Data)")
+st.title("Crypto Regime Dashboard (CoinGecko Data)")
 
-symbol = st.selectbox("Choose asset", SYMBOLS)
+coin_name = st.selectbox("Choose asset", list(COINS.keys()))
+coin_id = COINS[coin_name]
 
-result = calculate_regime(symbol)
+result = calculate_regime(coin_id)
 
 if result is None:
-    st.error("Binance temporarily unavailable.")
+    st.error("Could not fetch data. Try again in a few seconds.")
 else:
     price, sma50, sma200, vol30, vol180, label, score = result
 
     st.header(f"Final Regime: {label}")
-    st.write("Score:", score)
+    st.write("Regime Score:", score)
 
-    st.metric("Price", f"${price:,.2f}")
-    st.metric("SMA50", f"${sma50:,.2f}")
-    st.metric("SMA200", f"${sma200:,.2f}")
-    st.metric("Vol30", f"{vol30:.2f}")
-    st.metric("Vol180", f"{vol180:.2f}")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Price (USD)", f"${price:,.2f}")
+        st.metric("SMA50", f"${sma50:,.2f}")
+        st.metric("SMA200", f"${sma200:,.2f}")
+
+    with col2:
+        st.metric("Volatility 30D", f"{vol30:.2f}")
+        st.metric("Volatility 180D", f"{vol180:.2f}")
+
+    st.caption("Uses CoinGecko public API.")
