@@ -8,45 +8,31 @@ BINANCE_FUTURES = "https://fapi.binance.com"
 
 st.set_page_config(page_title="Crypto Regime Dashboard", layout="wide")
 
-
-# ----------------------------
-# SAFE API CALL
-# ----------------------------
+# Fixed symbols (avoid API crash in top10 endpoint)
+SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "AVAXUSDT",
+    "TRXUSDT"
+]
 
 def safe_get(url, params=None):
     try:
         r = requests.get(url, params=params, timeout=10)
         if r.status_code != 200:
             return None
-        return r.json()
+        data = r.json()
+        if isinstance(data, dict) and "code" in data:
+            return None
+        return data
     except:
         return None
 
-
-# ----------------------------
-# TOP 10 (by volume)
-# ----------------------------
-
-def get_top10():
-    data = safe_get(f"{BINANCE_SPOT}/api/v3/ticker/24hr")
-    if not isinstance(data, list):
-        return ["BTCUSDT", "ETHUSDT"]
-
-    pairs = []
-    for d in data:
-        if isinstance(d, dict) and d.get("symbol", "").endswith("USDT"):
-            try:
-                pairs.append((d["symbol"], float(d["quoteVolume"])))
-            except:
-                pass
-
-    pairs.sort(key=lambda x: x[1], reverse=True)
-    return [p[0] for p in pairs[:10]]
-
-
-# ----------------------------
-# KLINES
-# ----------------------------
 
 def get_klines(symbol):
     data = safe_get(
@@ -67,14 +53,10 @@ def get_klines(symbol):
     return df
 
 
-# ----------------------------
-# FUNDING
-# ----------------------------
-
 def get_funding(symbol):
     data = safe_get(
         f"{BINANCE_FUTURES}/fapi/v1/fundingRate",
-        params={"symbol": symbol, "limit": 20},
+        params={"symbol": symbol, "limit": 10},
     )
 
     if not isinstance(data, list) or len(data) == 0:
@@ -86,13 +68,8 @@ def get_funding(symbol):
         return None
 
 
-# ----------------------------
-# REGIME CALCULATION
-# ----------------------------
-
 def calculate_regime(symbol):
     df = get_klines(symbol)
-
     if df is None:
         return None
 
@@ -141,19 +118,16 @@ def calculate_regime(symbol):
     return price, sma50, sma200, vol30, vol180, funding, label, score
 
 
-# ----------------------------
-# UI
-# ----------------------------
+# ---------------- UI ----------------
 
 st.title("Crypto Regime Dashboard (Binance Public Data)")
 
-symbols = get_top10()
-symbol = st.selectbox("Choose asset", symbols)
+symbol = st.selectbox("Choose asset", SYMBOLS)
 
 result = calculate_regime(symbol)
 
 if result is None:
-    st.error("Could not fetch data from Binance. Try again in a few seconds.")
+    st.error("Binance temporarily unavailable. Try again in a few seconds.")
 else:
     price, sma50, sma200, vol30, vol180, funding, label, score = result
 
